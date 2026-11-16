@@ -136,6 +136,17 @@
   #ref.dragging { filter: drop-shadow(0 4px 10px rgba(0,0,0,.45)); }
   #ref.ghost { opacity: .55; }
 
+  #fitbar {
+    display: none;
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    border-top: 1px solid var(--line);
+    padding: 6px 12px;
+  }
+  body.fitting #fitbar { display: block; }
+  body.fitting .zoombar { display: none; }
+  .fit-msg { font-size: 13px; }
+  body.fitting #ref { cursor: grab; }
   .zoombar .row { flex-wrap: nowrap; }
   .zoombar .row.sub { flex-wrap: wrap; font-size: 12px; color: var(--muted); }
   #scaleText { font-variant-numeric: tabular-nums; }
@@ -191,6 +202,8 @@
     </span>
     <button id="rotate" type="button" title="Rotate 90°">⟳ Rotate</button>
     <button id="gridBtn" type="button" aria-pressed="true" title="Show 1 cm / 1 in grid">Grid</button>
+    <button id="photoBtn" type="button" title="Use your own photo of this object" aria-label="Photo">📷<span class="hide-sm"> Photo</span></button>
+    <input id="photoFile" type="file" accept="image/*" hidden>
   </div>
 </header>
 <div id="warn"></div>
@@ -202,6 +215,17 @@
   <div id="ref" role="img"></div>
 </main>
 
+<div id="fitbar">
+  <div class="row">
+    <span class="fit-msg">Line the photo's edge up with the red outline. Drag to move it, pinch or scroll to resize.</span>
+    <span class="spacer"></span>
+    <button id="phSmaller" type="button" aria-label="Shrink photo">−</button>
+    <button id="phBigger" type="button" aria-label="Enlarge photo">+</button>
+    <button id="phReplace" type="button">Replace…</button>
+    <button id="phRemove" type="button">Remove</button>
+    <button id="phDone" type="button" class="primary">Done</button>
+  </div>
+</div>
 <div class="zoombar">
   <div class="row">
     <button id="zoomOut" type="button" aria-label="Shrink">−</button>
@@ -347,14 +371,46 @@
     return 'M' + pts.join('L') + 'Z';
   }
 
-  function refSVG(ref) {
-    const { w, h } = refSize(ref);
-    const id = 'g' + Math.random().toString(36).slice(2, 7);
-    let body = '';
+  /* ---------------- user photos ----------------
+   * A photo is stored per reference object in the object's own (unrotated)
+   * mm coordinates: { src, x, y, w, ar } where ar = height / width.
+   * ------------------------------------------------------------- */
+  const PHOTO_KEY = 'realsize.photo.';
+  const photos = {};
+  let fitting = false;
+  const photoKey = () => state.refId === 'custom' ? 'custom-' + state.custom.shape : state.refId;
+  function getPhoto() {
+    const k = photoKey();
+    if (!(k in photos)) {
+      try { photos[k] = JSON.parse(localStorage.getItem(PHOTO_KEY + k) || 'null'); } catch (e) { photos[k] = null; }
+    }
+    return photos[k];
+  }
+  function savePhoto() {
+    const k = photoKey(), ph = photos[k];
+    try {
+      if (ph) localStorage.setItem(PHOTO_KEY + k, JSON.stringify(ph));
+      else localStorage.removeItem(PHOTO_KEY + k);
+    } catch (e) {
+      showWarn('Couldn\'t save the photo on this device (storage full or blocked). It will be gone after a reload.');
+    }
+  }
+  function natSize(ref) { return ref.shape === 'rect' ? { w: ref.w, h: ref.h } : { w: ref.d, h: ref.d }; }
+
+  function shapeMarkup(ref, attrs) {
+    const n = natSize(ref);
+    if (ref.shape === 'rect') return `<rect x="0" y="0" width="${n.w}" height="${n.h}" rx="${ref.r}" ${attrs}/>`;
+    const R = ref.d / 2;
+    if (ref.shape === 'scallop') return `<path d="${scallopPath(R, R, R, ref.n || 10, ref.dMin ? (ref.d - ref.dMin) / 2 : R * 0.035)}" ${attrs}/>`;
+    return `<circle cx="${R}" cy="${R}" r="${R}" ${attrs}/>`;
+  }
+
+  function drawnBody(ref, id) {
+    const { w, h } = natSize(ref);
     if (ref.shape === 'rect') {
       const [c1, c2] = ref.fill;
       const fs = Math.min(w, h) * 0.16;
-      body = `
+      return `
         <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs>
         <rect x="0" y="0" width="${w}" height="${h}" rx="${ref.r}" fill="url(#${id})" fill-opacity=".82"/>
@@ -363,30 +419,106 @@
         <line x1="${w * 0.12}" y1="${h / 2}" x2="${w * 0.88}" y2="${h / 2}" stroke="#fff" stroke-opacity=".35" stroke-width="0.25"/>
         <text x="${w / 2}" y="${h / 2}" dy="${fs * 0.35}" font-size="${fs}" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-weight="600"
           transform="${ref.label && w < h ? `rotate(-90 ${w / 2} ${h / 2})` : ''}">${ref.label || ''}</text>`;
-    } else {
-      const R = ref.d / 2, cx = R, cy = R;
-      const [hi, mid, lo] = ref.metal || SILVER;
-      const outline = ref.shape === 'scallop'
-        ? `<path d="${scallopPath(cx, cy, R, ref.n || 10, ref.dMin ? (ref.d - ref.dMin) / 2 : R * 0.035)}" fill="url(#${id})" stroke="${lo}" stroke-width="0.25"/>`
-        : `<circle cx="${cx}" cy="${cy}" r="${R - 0.12}" fill="url(#${id})" stroke="${lo}" stroke-width="0.25"/>`;
-      let inner = '';
-      if (ref.inner) {
-        const [ih, im, il] = ref.inner;
-        inner = `<defs><radialGradient id="${id}i" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="${ih}"/><stop offset=".6" stop-color="${im}"/><stop offset="1" stop-color="${il}"/></radialGradient></defs>
-          <circle cx="${cx}" cy="${cy}" r="${ref.innerD / 2}" fill="url(#${id}i)" stroke="${il}" stroke-width="0.2"/>`;
-      }
-      const fs = ref.d * (String(ref.label).length > 2 ? 0.22 : 0.36);
-      body = `
-        <defs><radialGradient id="${id}" cx=".35" cy=".3" r=".85">
-          <stop offset="0" stop-color="${hi}"/><stop offset=".6" stop-color="${mid}"/><stop offset="1" stop-color="${lo}"/></radialGradient></defs>
-        ${outline}
-        <circle cx="${cx}" cy="${cy}" r="${R * 0.86}" fill="none" stroke="${lo}" stroke-opacity=".6" stroke-width="0.25" stroke-dasharray="0.4 0.5"/>
-        ${inner}
-        <text x="${cx}" y="${cy}" dy="${fs * 0.35}" font-size="${fs}" text-anchor="middle" fill="${lo}" fill-opacity=".9" font-family="system-ui,sans-serif" font-weight="700">${ref.label || ''}</text>
-        <line x1="${cx - 1.2}" y1="${cy}" x2="${cx + 1.2}" y2="${cy}" stroke="#c00" stroke-width="0.18"/>
-        <line x1="${cx}" y1="${cy - 1.2}" x2="${cx}" y2="${cy + 1.2}" stroke="#c00" stroke-width="0.18"/>`;
     }
-    return `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${body}</svg>`;
+    const R = ref.d / 2, cx = R, cy = R;
+    const [hi, mid, lo] = ref.metal || SILVER;
+    const outline = ref.shape === 'scallop'
+      ? `<path d="${scallopPath(cx, cy, R, ref.n || 10, ref.dMin ? (ref.d - ref.dMin) / 2 : R * 0.035)}" fill="url(#${id})" stroke="${lo}" stroke-width="0.25"/>`
+      : `<circle cx="${cx}" cy="${cy}" r="${R - 0.12}" fill="url(#${id})" stroke="${lo}" stroke-width="0.25"/>`;
+    let inner = '';
+    if (ref.inner) {
+      const [ih, im, il] = ref.inner;
+      inner = `<defs><radialGradient id="${id}i" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="${ih}"/><stop offset=".6" stop-color="${im}"/><stop offset="1" stop-color="${il}"/></radialGradient></defs>
+        <circle cx="${cx}" cy="${cy}" r="${ref.innerD / 2}" fill="url(#${id}i)" stroke="${il}" stroke-width="0.2"/>`;
+    }
+    const fs = ref.d * (String(ref.label).length > 2 ? 0.22 : 0.36);
+    return `
+      <defs><radialGradient id="${id}" cx=".35" cy=".3" r=".85">
+        <stop offset="0" stop-color="${hi}"/><stop offset=".6" stop-color="${mid}"/><stop offset="1" stop-color="${lo}"/></radialGradient></defs>
+      ${outline}
+      <circle cx="${cx}" cy="${cy}" r="${R * 0.86}" fill="none" stroke="${lo}" stroke-opacity=".6" stroke-width="0.25" stroke-dasharray="0.4 0.5"/>
+      ${inner}
+      <text x="${cx}" y="${cy}" dy="${fs * 0.35}" font-size="${fs}" text-anchor="middle" fill="${lo}" fill-opacity=".9" font-family="system-ui,sans-serif" font-weight="700">${ref.label || ''}</text>
+      <line x1="${cx - 1.2}" y1="${cy}" x2="${cx + 1.2}" y2="${cy}" stroke="#c00" stroke-width="0.18"/>
+      <line x1="${cx}" y1="${cy - 1.2}" x2="${cx}" y2="${cy + 1.2}" stroke="#c00" stroke-width="0.18"/>`;
+  }
+
+  function photoBody(ref, ph, id) {
+    const img = `href="${ph.src}" x="${ph.x}" y="${ph.y}" width="${ph.w}" height="${ph.w * ph.ar}" preserveAspectRatio="none"`;
+    return `
+      <defs><clipPath id="${id}">${shapeMarkup(ref, '')}</clipPath></defs>
+      ${fitting ? `<image class="ph" ${img} opacity=".35"/>` : ''}
+      <g clip-path="url(#${id})">${shapeMarkup(ref, 'fill="#8a8f98"')}<image class="ph" ${img}/></g>
+      ${fitting
+        ? shapeMarkup(ref, 'fill="none" stroke="#ff2d55" stroke-width="0.35"')
+        : shapeMarkup(ref, 'fill="none" stroke="#000" stroke-opacity=".45" stroke-width="0.25"')}`;
+  }
+
+  function refSVG(ref) {
+    const n = natSize(ref), d = refSize(ref);
+    const rot = ref.shape === 'rect' && state.rotated;
+    const id = 'g' + Math.random().toString(36).slice(2, 7);
+    const ph = getPhoto();
+    const body = ph ? photoBody(ref, ph, id) : drawnBody(ref, id);
+    return `<svg viewBox="0 0 ${d.w} ${d.h}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">` +
+      `<g${rot ? ` transform="translate(${n.h} 0) rotate(90)"` : ''}>${body}</g></svg>`;
+  }
+
+  // Cheap update while dragging/scaling a photo: only move the <image> elements
+  function updatePhotoEls() {
+    const ph = getPhoto();
+    if (!ph) return;
+    refEl.querySelectorAll('image.ph').forEach(im => {
+      im.setAttribute('x', ph.x); im.setAttribute('y', ph.y);
+      im.setAttribute('width', ph.w); im.setAttribute('height', ph.w * ph.ar);
+    });
+  }
+  function scalePhoto(k) {
+    const ph = getPhoto();
+    if (!ph) return;
+    const n = natSize(currentRef());
+    const w = Math.min(Math.max(ph.w * k, n.w * 0.2), n.w * 20);
+    const cx = ph.x + ph.w / 2, cy = ph.y + ph.w * ph.ar / 2;
+    ph.w = w; ph.x = cx - w / 2; ph.y = cy - w * ph.ar / 2;
+    updatePhotoEls();
+  }
+  // Display-space delta (mm) -> object-space delta (mm), undoing the 90° rotation
+  function movePhoto(dx, dy) {
+    const ph = getPhoto();
+    if (!ph) return;
+    const rot = currentRef().shape === 'rect' && state.rotated;
+    if (rot) { ph.x += dy; ph.y -= dx; } else { ph.x += dx; ph.y += dy; }
+    updatePhotoEls();
+  }
+
+  function loadPhotoFile(file) {
+    if (!file || !/^image\//.test(file.type)) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1200;
+      const k = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+      const cw = Math.round(img.naturalWidth * k), ch = Math.round(img.naturalHeight * k);
+      const c = document.createElement('canvas');
+      c.width = cw; c.height = ch;
+      c.getContext('2d').drawImage(img, 0, 0, cw, ch);
+      URL.revokeObjectURL(url);
+      const ar = ch / cw, n = natSize(currentRef());
+      // Start as "cover": the photo fills the outline, centred
+      const w = (cw / ch > n.w / n.h) ? n.h / ar : n.w;
+      photos[photoKey()] = { src: c.toDataURL('image/jpeg', 0.85), x: (n.w - w) / 2, y: (n.h - w * ar) / 2, w, ar };
+      savePhoto();
+      setFitting(true);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); showWarn('That file couldn\'t be read as an image.'); };
+    img.src = url;
+  }
+
+  function setFitting(on) {
+    fitting = on && !!getPhoto();
+    document.body.classList.toggle('fitting', fitting);
+    if (!fitting) savePhoto();
+    buildRef(); render();
   }
 
   function buildRef() {
@@ -397,6 +529,7 @@
     $('rotate').disabled = ref.shape !== 'rect';
     $('custom').classList.toggle('show', state.refId === 'custom');
     $('cBwrap').style.display = state.custom.shape === 'rect' ? '' : 'none';
+    $('photoBtn').innerHTML = '📷<span class="hide-sm"> ' + (getPhoto() ? 'Edit photo' : 'Photo') + '</span>';
     clampRef();
   }
 
@@ -503,6 +636,7 @@
   stage.addEventListener('wheel', e => {
     e.preventDefault();
     const r = stageRect();
+    if (fitting) { scalePhoto(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))); schedulePhotoSave(); return; }
     if (state.locked) { pan.x -= e.deltaX; pan.y -= e.deltaY; render(); return; }
     // ctrlKey = trackpad pinch on desktop browsers
     const speed = e.ctrlKey ? 0.01 : (e.deltaMode === 1 ? 0.05 : 0.0015);
@@ -516,6 +650,12 @@
   function localPt(e) { const r = stageRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
   function beginGesture(e) {
     const pts = [...pointers.values()];
+    if (pts.length >= 2 && fitting) {
+      const [a, b] = pts;
+      mode = 'photoPinch';
+      start = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, last: 1 };
+      return;
+    }
     if (pts.length >= 2) {
       if (state.locked) { mode = 'pan'; start = { p: pts[0], pan: { ...pan } }; return; }
       const [a, b] = pts;
@@ -524,7 +664,10 @@
       refEl.classList.remove('dragging');
     } else if (pts.length === 1) {
       const p = pts[0];
-      if (e && refEl.contains(e.target)) {
+      if (e && fitting && refEl.contains(e.target)) {
+        mode = 'photo';
+        start = { p: { ...p } };
+      } else if (e && refEl.contains(e.target)) {
         mode = 'ref';
         const c = refScreenCenter();
         start = { off: { x: p.x - c.x, y: p.y - c.y } };
@@ -552,6 +695,15 @@
       state.refPos.x = (p.x - start.off.x - pan.x) / state.ppm;
       state.refPos.y = (p.y - start.off.y - pan.y) / state.ppm;
       clampRef(); render();
+    } else if (mode === 'photo') {
+      const p = pts[0];
+      movePhoto((p.x - start.p.x) / state.ppm, (p.y - start.p.y) / state.ppm);
+      start.p = { ...p };
+    } else if (mode === 'photoPinch' && pts.length >= 2) {
+      const [a, b] = pts;
+      const k = Math.hypot(a.x - b.x, a.y - b.y) / start.d;
+      scalePhoto(k / start.last);
+      start.last = k;
     } else if (mode === 'pan') {
       const p = pts[0];
       pan.x = start.pan.x + (p.x - start.p.x);
@@ -576,7 +728,7 @@
     pointers.delete(e.pointerId);
     refEl.classList.remove('dragging');
     stage.classList.remove('panning');
-    if (pointers.size === 0) { mode = null; save(); }
+    if (pointers.size === 0) { if (mode === 'photo' || mode === 'photoPinch') savePhoto(); mode = null; save(); }
     else { mode = null; beginGesture(null); } // pinch -> one finger: continue as pan
   }
   stage.addEventListener('pointerup', endPointer);
@@ -609,11 +761,29 @@
     showPaperInputs(); centerView(); save();
     presetSel.value = '';
   });
-  refSel.addEventListener('change', () => { state.refId = refSel.value; state.rotated = false; buildRef(); render(); save(); });
+  refSel.addEventListener('change', () => { if (fitting) setFitting(false); state.refId = refSel.value; state.rotated = false; buildRef(); render(); save(); });
   $('rotate').addEventListener('click', () => { state.rotated = !state.rotated; buildRef(); render(); save(); });
   gridBtn.addEventListener('click', () => { state.grid = !state.grid; render(); save(); });
   lockBtn.addEventListener('click', () => { state.locked = !state.locked; if (state.locked) state.calibrated = true; render(); save(); });
   $('center').addEventListener('click', centerView);
+
+  const photoFile = $('photoFile');
+  $('photoBtn').addEventListener('click', () => getPhoto() ? setFitting(!fitting) : photoFile.click());
+  $('phReplace').addEventListener('click', () => photoFile.click());
+  photoFile.addEventListener('change', () => { loadPhotoFile(photoFile.files[0]); photoFile.value = ''; });
+  $('phDone').addEventListener('click', () => setFitting(false));
+  $('phRemove').addEventListener('click', () => { photos[photoKey()] = null; savePhoto(); setFitting(false); });
+  let phSaveT = 0;
+  function schedulePhotoSave() { clearTimeout(phSaveT); phSaveT = setTimeout(savePhoto, 300); }
+  stepPhoto($('phBigger'), 1.01);
+  stepPhoto($('phSmaller'), 1 / 1.01);
+  function stepPhoto(btn, k) {
+    let t = 0, iv = 0;
+    const stop = () => { clearTimeout(t); clearInterval(iv); schedulePhotoSave(); };
+    btn.addEventListener('pointerdown', () => { scalePhoto(k); t = setTimeout(() => { iv = setInterval(() => scalePhoto(k), 40); }, 350); });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => btn.addEventListener(ev, stop));
+    btn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); scalePhoto(k); schedulePhotoSave(); } });
+  }
 
   const cShape = $('cShape'), cA = $('cA'), cB = $('cB');
   function readCustom() {
@@ -642,6 +812,13 @@
     render();
   }
 
+  function showWarn(msg) {
+    const warn = $('warn');
+    warn.textContent = msg;
+    warn.classList.add('show');
+    clearTimeout(showWarn.t);
+    showWarn.t = setTimeout(checkDpr, 6000);
+  }
   function checkDpr() {
     const warn = $('warn');
     const now = window.devicePixelRatio || 1;
@@ -661,7 +838,7 @@
   requestAnimationFrame(() => { centerView(); checkDpr(); });
 
   // Test hook (harmless in production)
-  window.RealSize = { state, REFS, render, zoomTo };
+  window.RealSize = { state, REFS, render, zoomTo, photos, getPhoto, loadPhotoFile };
 })();
 </script>
 </body>
