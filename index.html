@@ -229,17 +229,24 @@
    * ------------------------------------------------------------- */
   const SILVER = ['#f4f5f7', '#b9bec7', '#8b919c'];
   const BRASS  = ['#fbe7a1', '#d6b04c', '#a07c1f'];
+  // Sources (checked 2026-11-16):
+  //  - Coin diameters: Wikipedia "Coins of the Hong Kong dollar" (HKMA publishes no diameters online).
+  //    Metals/edges cross-checked with the HKMA "Security Features" leaflet.
+  //  - HK$100 (2018 series): HKMA 2018 New Series leaflet, 153 x 76.5 mm.
+  //  - Card: ISO/IEC 7810 ID-1, 85.60 x 53.98 mm, corner radius 3.18 mm.
+  //  - iPhone 16: support.apple.com/121029, 147.6 x 71.6 mm. Corner radius is not published (estimate).
+  //  Scalloped coins: d = across the bumps, dMin = across the dips.
   const REFS = [
     { id: 'hkd5',   group: 'Hong Kong coins', name: 'HK$5 coin',   shape: 'circle',  d: 27.0, metal: SILVER, label: '5' },
-    { id: 'hkd10',  group: 'Hong Kong coins', name: 'HK$10 coin',  shape: 'circle',  d: 24.0, metal: BRASS, inner: SILVER, innerD: 17.0, label: '10' },
-    { id: 'hkd2',   group: 'Hong Kong coins', name: 'HK$2 coin',   shape: 'scallop', d: 28.0, n: 10, metal: SILVER, label: '2' },
+    { id: 'hkd10',  group: 'Hong Kong coins', name: 'HK$10 coin',  shape: 'circle',  d: 24.0, metal: SILVER, inner: BRASS, innerD: 17.0, label: '10' },
+    { id: 'hkd2',   group: 'Hong Kong coins', name: 'HK$2 coin',   shape: 'scallop', d: 28.0, dMin: 26.3, n: 10, metal: SILVER, label: '2' },
     { id: 'hkd1',   group: 'Hong Kong coins', name: 'HK$1 coin',   shape: 'circle',  d: 25.5, metal: SILVER, label: '1' },
     { id: 'hkc50',  group: 'Hong Kong coins', name: 'HK 50¢ coin', shape: 'circle',  d: 22.5, metal: BRASS,  label: '50' },
-    { id: 'hkc20',  group: 'Hong Kong coins', name: 'HK 20¢ coin', shape: 'scallop', d: 19.0, n: 10, metal: BRASS, label: '20' },
+    { id: 'hkc20',  group: 'Hong Kong coins', name: 'HK 20¢ coin', shape: 'scallop', d: 19.0, dMin: 18.0, n: 10, metal: BRASS, label: '20' },
     { id: 'hkc10',  group: 'Hong Kong coins', name: 'HK 10¢ coin', shape: 'circle',  d: 17.5, metal: BRASS,  label: '10' },
     { id: 'card',   group: 'Cards',           name: 'Credit / Octopus / ID card', shape: 'rect', w: 85.60, h: 53.98, r: 3.18, fill: ['#3b6fd8', '#22408c'], label: 'ISO ID-1 card', note: 'Most accurate: largest standard size' },
-    { id: 'hkd100', group: 'Banknotes',       name: 'HK$100 note (approx. 153 × 76)', shape: 'rect', w: 153, h: 76, r: 1, fill: ['#e0574f', '#9e2a24'], label: 'HK$100', approx: true },
-    { id: 'iph16',  group: 'Phones',          name: 'iPhone 15 / 16 (approx.)', shape: 'rect', w: 71.6, h: 147.6, r: 10, fill: ['#3a3d44', '#15171b'], label: 'iPhone', approx: true },
+    { id: 'hkd100', group: 'Banknotes',       name: 'HK$100 note, 2018 series (153 × 76.5)', shape: 'rect', w: 153, h: 76.5, r: 1, fill: ['#e0574f', '#9e2a24'], label: 'HK$100' },
+    { id: 'iph16',  group: 'Phones',          name: 'iPhone 16 (147.6 × 71.6)', shape: 'rect', w: 71.6, h: 147.6, r: 10, fill: ['#3a3d44', '#15171b'], label: 'iPhone 16' },
     { id: 'custom', group: 'Other',           name: 'Custom…', shape: 'circle', d: 27, metal: SILVER, label: '' },
   ];
 
@@ -328,10 +335,10 @@
     return { w: ref.d, h: ref.d };
   }
 
-  function scallopPath(cx, cy, R, n) {
+  function scallopPath(cx, cy, R, n, depth) {
     // n outward bumps; outer extent = R so the measured diameter is the across-bumps size
     const pts = [];
-    const steps = n * 24, depth = R * 0.035;
+    const steps = n * 24;
     for (let i = 0; i <= steps; i++) {
       const t = (i / steps) * Math.PI * 2;
       const r = R - depth * (1 - Math.abs(Math.cos(t * n / 2)));
@@ -360,7 +367,7 @@
       const R = ref.d / 2, cx = R, cy = R;
       const [hi, mid, lo] = ref.metal || SILVER;
       const outline = ref.shape === 'scallop'
-        ? `<path d="${scallopPath(cx, cy, R, ref.n || 10)}" fill="url(#${id})" stroke="${lo}" stroke-width="0.25"/>`
+        ? `<path d="${scallopPath(cx, cy, R, ref.n || 10, ref.dMin ? (ref.d - ref.dMin) / 2 : R * 0.035)}" fill="url(#${id})" stroke="${lo}" stroke-width="0.25"/>`
         : `<circle cx="${cx}" cy="${cy}" r="${R - 0.12}" fill="url(#${id})" stroke="${lo}" stroke-width="0.25"/>`;
       let inner = '';
       if (ref.inner) {
