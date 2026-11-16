@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>RealSize</title>
+<meta name="description" content="See any dimension at true size on your screen. Calibrate with a coin, card or banknote you already have.">
+<style>
+  :root {
+    --bg: #eef0f3;
+    --panel: #ffffff;
+    --text: #1d2330;
+    --muted: #5f6878;
+    --line: #d5d9e0;
+    --accent: #1f6feb;
+    --accent-text: #ffffff;
+    --warn-bg: #fff4d6;
+    --warn-text: #6b4b00;
+    --paper: #ffffff;
+    --paper-shadow: rgba(20, 30, 50, .22);
+    --grid-major: rgba(31, 111, 235, .28);
+    --grid-minor: rgba(31, 111, 235, .09);
+    --dim: #5f6878;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b;
+      --panel: #1b1f27;
+      --text: #e6e9ef;
+      --muted: #9aa3b2;
+      --line: #2e3440;
+      --accent: #4c8dff;
+      --accent-text: #0b1020;
+      --warn-bg: #3a2f10;
+      --warn-text: #ffd98a;
+      --paper: #f7f7f4;
+      --paper-shadow: rgba(0, 0, 0, .6);
+      --dim: #9aa3b2;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans HK", sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  header, .zoombar {
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    padding: 8px 12px;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+  .zoombar {
+    border-bottom: 0;
+    border-top: 1px solid var(--line);
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .row + .row { margin-top: 6px; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
+  h1 span { color: var(--accent); }
+  .status { margin-left: auto; color: var(--muted); font-size: 12px; text-align: right; }
+  label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+  input, select, button {
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 8px;
+    min-height: 34px;
+  }
+  input[type=number] { width: 78px; }
+  input[type=range] { padding: 0; border: 0; background: none; flex: 1; min-width: 120px; accent-color: var(--accent); }
+  button { cursor: pointer; white-space: nowrap; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button[aria-pressed=true] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled, input:disabled { opacity: .45; cursor: not-allowed; }
+  .times { color: var(--muted); }
+  #custom { display: none; }
+  #custom.show { display: inline-flex; gap: 6px; align-items: center; }
+  #custom input { width: 70px; }
+
+  #warn {
+    display: none;
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+  #warn.show { display: block; }
+
+  #stage {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    touch-action: none;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #stage.panning { cursor: grabbing; }
+  #paper {
+    position: absolute;
+    background-color: var(--paper);
+    box-shadow: 0 2px 14px var(--paper-shadow);
+    background-image:
+      linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px),
+      linear-gradient(to right, var(--grid-minor) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-minor) 1px, transparent 1px);
+  }
+  #paper.nogrid { background-image: none; }
+  .dim {
+    position: absolute;
+    color: var(--dim);
+    font-size: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  #dimW { transform: translate(-50%, -100%); padding-bottom: 4px; }
+  #dimH { transform: translate(-50%, -50%) rotate(-90deg); }
+  #ref {
+    position: absolute;
+    cursor: move;
+    filter: drop-shadow(0 1px 3px rgba(0,0,0,.35));
+  }
+  #ref svg { display: block; width: 100%; height: 100%; overflow: visible; }
+  #ref.dragging { filter: drop-shadow(0 4px 10px rgba(0,0,0,.45)); }
+  #ref.ghost { opacity: .55; }
+
+  .zoombar .row { flex-wrap: nowrap; }
+  .zoombar .row.sub { flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  #scaleText { font-variant-numeric: tabular-nums; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .spacer { flex: 1; }
+
+  @media (max-width: 560px) {
+    body { font-size: 13px; }
+    header { padding-top: max(6px, env(safe-area-inset-top)); }
+    .status { width: 100%; text-align: left; margin-left: 0; }
+    input[type=number] { width: 64px; }
+    .hide-sm { display: none; }
+    header .row + .row { margin-top: 4px; }
+    select, input, button { min-height: 32px; padding: 4px 6px; }
+    #preset { max-width: 92px; }
+    #refSel { max-width: 200px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>Real<span>Size</span></h1>
+    <div class="status" id="status"></div>
+  </div>
+  <div class="row">
+    <label><span class="hide-sm">Size</span>
+      <input id="w" type="number" min="0.1" step="any" inputmode="decimal" aria-label="Width">
+    </label>
+    <span class="times">×</span>
+    <input id="h" type="number" min="0.1" step="any" inputmode="decimal" aria-label="Height">
+    <select id="unit" aria-label="Unit">
+      <option value="mm">mm</option>
+      <option value="cm">cm</option>
+      <option value="in">in</option>
+    </select>
+    <select id="preset" aria-label="Paper preset">
+      <option value="">Preset…</option>
+    </select>
+  </div>
+  <div class="row">
+    <label><span class="hide-sm">Reference</span>
+      <select id="refSel" aria-label="Reference object"></select>
+    </label>
+    <span id="custom">
+      <select id="cShape" aria-label="Custom shape">
+        <option value="circle">Circle Ø</option>
+        <option value="rect">Rectangle</option>
+      </select>
+      <input id="cA" type="number" min="1" step="any" inputmode="decimal" aria-label="Custom diameter or width (mm)" placeholder="mm">
+      <span id="cBwrap">× <input id="cB" type="number" min="1" step="any" inputmode="decimal" aria-label="Custom height (mm)" placeholder="mm"></span>
+      <span class="times">mm</span>
+    </span>
+    <button id="rotate" type="button" title="Rotate 90°">⟳ Rotate</button>
+    <button id="gridBtn" type="button" aria-pressed="true" title="Show 1 cm / 1 in grid">Grid</button>
+  </div>
+</header>
+<div id="warn"></div>
+
+<main id="stage" aria-label="Paper at calibrated size. Drag to pan, pinch or scroll to zoom.">
+  <div id="paper"></div>
+  <div class="dim" id="dimW"></div>
+  <div class="dim" id="dimH"></div>
+  <div id="ref" role="img"></div>
+</main>
+
+<div class="zoombar">
+  <div class="row">
+    <button id="zoomOut" type="button" aria-label="Shrink">−</button>
+    <input id="zoom" type="range" min="0" max="1000" step="1" aria-label="Zoom (calibration)">
+    <button id="zoomIn" type="button" aria-label="Grow">+</button>
+    <button id="lock" type="button" aria-pressed="false" title="Lock the scale so you can't change it by accident">🔓 Lock</button>
+    <button id="center" type="button" class="hide-sm" title="Center the paper">Center</button>
+  </div>
+  <div class="row sub">
+    <span id="scaleText"></span>
+    <span class="spacer"></span>
+    <span class="hint" id="hint"></span>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ---------------------------------------------------------------
+   * Reference objects. All sizes in millimetres.
+   * shape: 'circle' (d), 'scallop' (d, n = number of scallops),
+   *        'rect' (w, h, r = corner radius).
+   * Add iPhones, notes, cards etc. here; nothing else needs changing.
+   * ------------------------------------------------------------- */
+  const SILVER = ['#f4f5f7', '#b9bec7', '#8b919c'];
+  const BRASS  = ['#fbe7a1', '#d6b04c', '#a07c1f'];
+  const REFS = [
+    { id: 'hkd5',   group: 'Hong Kong coins', name: 'HK$5 coin',   shape: 'circle',  d: 27.0, metal: SILVER, label: '5' },
+    { id: 'hkd10',  group: 'Hong Kong coins', name: 'HK$10 coin',  shape: 'circle',  d: 24.0, metal: BRASS, inner: SILVER, innerD: 17.0, label: '10' },
+    { id: 'hkd2',   group: 'Hong Kong coins', name: 'HK$2 coin',   shape: 'scallop', d: 28.0, n: 10, metal: SILVER, label: '2' },
+    { id: 'hkd1',   group: 'Hong Kong coins', name: 'HK$1 coin',   shape: 'circle',  d: 25.5, metal: SILVER, label: '1' },
+    { id: 'hkc50',  group: 'Hong Kong coins', name: 'HK 50¢ coin', shape: 'circle',  d: 22.5, metal: BRASS,  label: '50' },
+    { id: 'hkc20',  group: 'Hong Kong coins', name: 'HK 20¢ coin', shape: 'scallop', d: 19.0, n: 10, metal: BRASS, label: '20' },
+    { id: 'hkc10',  group: 'Hong Kong coins', name: 'HK 10¢ coin', shape: 'circle',  d: 17.5, metal: BRASS,  label: '10' },
+    { id: 'card',   group: 'Cards',           name: 'Credit / Octopus / ID card', shape: 'rect', w: 85.60, h: 53.98, r: 3.18, fill: ['#3b6fd8', '#22408c'], label: 'ISO ID-1 card', note: 'Most accurate: largest standard size' },
+    { id: 'hkd100', group: 'Banknotes',       name: 'HK$100 note (approx. 153 × 76)', shape: 'rect', w: 153, h: 76, r: 1, fill: ['#e0574f', '#9e2a24'], label: 'HK$100', approx: true },
+    { id: 'iph16',  group: 'Phones',          name: 'iPhone 15 / 16 (approx.)', shape: 'rect', w: 71.6, h: 147.6, r: 10, fill: ['#3a3d44', '#15171b'], label: 'iPhone', approx: true },
+    { id: 'custom', group: 'Other',           name: 'Custom…', shape: 'circle', d: 27, metal: SILVER, label: '' },
+  ];
+
+  const PRESETS = [
+    { name: 'A4 (210 × 297 mm)', w: 210, h: 297 },
+    { name: 'A5 (148 × 210 mm)', w: 148, h: 210 },
+    { name: 'A3 (297 × 420 mm)', w: 297, h: 420 },
+    { name: 'Letter (8.5 × 11 in)', w: 215.9, h: 279.4 },
+    { name: '4R photo (4 × 6 in)', w: 101.6, h: 152.4 },
+    { name: 'Business card (90 × 54 mm)', w: 90, h: 54 },
+    { name: '10 cm square', w: 100, h: 100 },
+  ];
+
+  const UNIT_MM = { mm: 1, cm: 10, in: 25.4 };
+  const DEFAULT_PPM = 96 / 25.4;          // CSS reference pixel: 96 px per inch
+  const MIN_PPM = 0.5, MAX_PPM = 25;
+  const STORE_KEY = 'realsize.v1';
+
+  /* ---------------- state ---------------- */
+  const state = {
+    ppm: DEFAULT_PPM,         // CSS px per mm: THE calibration
+    dpr: window.devicePixelRatio || 1,
+    calibrated: false,
+    locked: false,
+    unit: 'mm',
+    paper: { w: 210, h: 297 },
+    refId: 'hkd5',
+    rotated: false,
+    grid: true,
+    custom: { shape: 'circle', a: 27, b: 50 },
+    refPos: null,             // centre of reference, mm from paper top-left
+  };
+  let pan = { x: 0, y: 0 };   // screen px of paper top-left inside stage
+
+  function load() {
+    try {
+      const s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+      if (s && typeof s === 'object') {
+        if (isFinite(s.ppm) && s.ppm >= MIN_PPM && s.ppm <= MAX_PPM) state.ppm = s.ppm;
+        for (const k of ['dpr', 'calibrated', 'locked', 'unit', 'refId', 'rotated', 'grid']) if (k in s) state[k] = s[k];
+        if (s.paper && s.paper.w > 0 && s.paper.h > 0) state.paper = s.paper;
+        if (s.custom) state.custom = Object.assign(state.custom, s.custom);
+        if (s.refPos && isFinite(s.refPos.x)) state.refPos = s.refPos;
+        if (!UNIT_MM[state.unit]) state.unit = 'mm';
+        if (!REFS.some(r => r.id === state.refId)) state.refId = 'hkd5';
+        return true;
+      }
+    } catch (e) { /* storage unavailable: run with defaults */ }
+    return false;
+  }
+  let saveTimer = 0;
+  function save() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
+    }, 150);
+  }
+
+  /* ---------------- dom ---------------- */
+  const $ = id => document.getElementById(id);
+  const stage = $('stage'), paperEl = $('paper'), refEl = $('ref');
+  const wIn = $('w'), hIn = $('h'), unitSel = $('unit'), presetSel = $('preset'), refSel = $('refSel');
+  const zoom = $('zoom'), lockBtn = $('lock'), gridBtn = $('gridBtn');
+
+  // Build selects
+  PRESETS.forEach((p, i) => presetSel.add(new Option(p.name, i)));
+  const groups = {};
+  REFS.forEach(r => {
+    if (!groups[r.group]) { groups[r.group] = document.createElement('optgroup'); groups[r.group].label = r.group; refSel.appendChild(groups[r.group]); }
+    groups[r.group].appendChild(new Option(r.name + (r.shape !== 'rect' && r.id !== 'custom' ? ` (Ø ${r.d} mm)` : ''), r.id));
+  });
+
+  /* ---------------- reference geometry ---------------- */
+  function currentRef() {
+    const base = REFS.find(r => r.id === state.refId) || REFS[0];
+    if (base.id !== 'custom') return base;
+    const c = state.custom;
+    const a = Math.max(1, +c.a || 27), b = Math.max(1, +c.b || 50);
+    return c.shape === 'rect'
+      ? { ...base, shape: 'rect', w: a, h: b, r: Math.min(a, b) * 0.04, fill: ['#7a8597', '#4a5263'], label: `${a} × ${b}` }
+      : { ...base, shape: 'circle', d: a, label: `Ø${a}` };
+  }
+  // Size in mm after rotation
+  function refSize(ref) {
+    if (ref.shape === 'rect') return state.rotated ? { w: ref.h, h: ref.w } : { w: ref.w, h: ref.h };
+    return { w: ref.d, h: ref.d };
+  }
+
+  function scallopPath(cx, cy, R, n) {
+    // n outward bumps; outer extent = R so the measured diameter is the across-bumps size
+    const pts = [];
+    const steps = n * 24, depth = R * 0.035;
+    for (let i = 0; i <= steps; i++) {
+      const t = (i / steps) * Math.PI * 2;
+      const r = R - depth * (1 - Math.abs(Math.cos(t * n / 2)));
+      pts.push(`${(cx + r * Math.sin(t)).toFixed(3)},${(cy - r * Math.cos(t)).toFixed(3)}`);
+    }
+    return 'M' + pts.join('L') + 'Z';
+  }
+
+  function refSVG(ref) {
+    const { w, h } = refSize(ref);
+    const id = 'g' + Math.random().toString(36).slice(2, 7);
+    let body = '';
+    if (ref.shape === 'rect') {
+      const [c1, c2] = ref.fill;
+      const fs = Math.min(w, h) * 0.16;
+      body = `
+        <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs>
+        <rect x="0" y="0" width="${w}" height="${h}" rx="${ref.r}" fill="url(#${id})" fill-opacity=".82"/>
+        <rect x="0.15" y="0.15" width="${w - 0.3}" height="${h - 0.3}" rx="${ref.r}" fill="none" stroke="#000" stroke-opacity=".55" stroke-width="0.3"/>
+        <line x1="${w / 2}" y1="${h * 0.12}" x2="${w / 2}" y2="${h * 0.88}" stroke="#fff" stroke-opacity=".35" stroke-width="0.25"/>
+        <line x1="${w * 0.12}" y1="${h / 2}" x2="${w * 0.88}" y2="${h / 2}" stroke="#fff" stroke-opacity=".35" stroke-width="0.25"/>
+        <text x="${w / 2}" y="${h / 2}" dy="${fs * 0.35}" font-size="${fs}" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-weight="600"
+          transform="${ref.label && w < h ? `rotate(-90 ${w / 2} ${h / 2})` : ''}">${ref.label || ''}</text>`;
+    } else {
+      const R = ref.d / 2, cx = R, cy = R;
+      const [hi, mid, lo] = ref.metal || SILVER;
+      const outline = ref.shape === 'scallop'
+        ? `<path d="${scallopPath(cx, cy, R, ref.n || 10)}" fill="url(#${id})" stroke="${lo}" stroke-width="0.25"/>`
+        : `<circle cx="${cx}" cy="${cy}" r="${R - 0.12}" fill="url(#${id})" stroke="${lo}" stroke-width="0.25"/>`;
+      let inner = '';
+      if (ref.inner) {
+        const [ih, im, il] = ref.inner;
+        inner = `<defs><radialGradient id="${id}i" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="${ih}"/><stop offset=".6" stop-color="${im}"/><stop offset="1" stop-color="${il}"/></radialGradient></defs>
+          <circle cx="${cx}" cy="${cy}" r="${ref.innerD / 2}" fill="url(#${id}i)" stroke="${il}" stroke-width="0.2"/>`;
+      }
+      const fs = ref.d * (String(ref.label).length > 2 ? 0.22 : 0.36);
+      body = `
+        <defs><radialGradient id="${id}" cx=".35" cy=".3" r=".85">
+          <stop offset="0" stop-color="${hi}"/><stop offset=".6" stop-color="${mid}"/><stop offset="1" stop-color="${lo}"/></radialGradient></defs>
+        ${outline}
+        <circle cx="${cx}" cy="${cy}" r="${R * 0.86}" fill="none" stroke="${lo}" stroke-opacity=".6" stroke-width="0.25" stroke-dasharray="0.4 0.5"/>
+        ${inner}
+        <text x="${cx}" y="${cy}" dy="${fs * 0.35}" font-size="${fs}" text-anchor="middle" fill="${lo}" fill-opacity=".9" font-family="system-ui,sans-serif" font-weight="700">${ref.label || ''}</text>
+        <line x1="${cx - 1.2}" y1="${cy}" x2="${cx + 1.2}" y2="${cy}" stroke="#c00" stroke-width="0.18"/>
+        <line x1="${cx}" y1="${cy - 1.2}" x2="${cx}" y2="${cy + 1.2}" stroke="#c00" stroke-width="0.18"/>`;
+    }
+    return `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${body}</svg>`;
+  }
+
+  function buildRef() {
+    const ref = currentRef();
+    refEl.innerHTML = refSVG(ref);
+    const s = refSize(ref);
+    refEl.setAttribute('aria-label', `${ref.name}: ${s.w} × ${s.h} mm`);
+    $('rotate').disabled = ref.shape !== 'rect';
+    $('custom').classList.toggle('show', state.refId === 'custom');
+    $('cBwrap').style.display = state.custom.shape === 'rect' ? '' : 'none';
+    clampRef();
+  }
+
+  /* ---------------- layout ---------------- */
+  function clampRef() {
+    if (!state.refPos) state.refPos = { x: state.paper.w / 2, y: state.paper.h / 2 };
+    state.refPos.x = Math.min(Math.max(state.refPos.x, 0), state.paper.w);
+    state.refPos.y = Math.min(Math.max(state.refPos.y, 0), state.paper.h);
+  }
+
+  const fmt = (mm, unit) => {
+    const v = mm / UNIT_MM[unit];
+    return (unit === 'mm' ? +v.toFixed(1) : +v.toFixed(unit === 'cm' ? 2 : 3)).toString();
+  };
+
+  function render() {
+    const p = state.ppm;
+    const W = state.paper.w * p, H = state.paper.h * p;
+    Object.assign(paperEl.style, { left: pan.x + 'px', top: pan.y + 'px', width: W + 'px', height: H + 'px' });
+
+    // grid: major every 1 cm (or 1 in), minor every 1 mm (or 1/8 in) when it's big enough to see
+    paperEl.classList.toggle('nogrid', !state.grid);
+    const inch = state.unit === 'in';
+    const major = (inch ? 25.4 : 10) * p;
+    let minor = (inch ? 25.4 / 8 : 1) * p;
+    if (minor < 5) minor = (inch ? 25.4 / 2 : 5) * p;
+    if (minor < 5) minor = major;
+    paperEl.style.backgroundSize = `${major}px ${major}px, ${major}px ${major}px, ${minor}px ${minor}px, ${minor}px ${minor}px`;
+
+    const u = state.unit;
+    const dW = $('dimW'), dH = $('dimH');
+    dW.textContent = `${fmt(state.paper.w, u)} ${u}`;
+    dH.textContent = `${fmt(state.paper.h, u)} ${u}`;
+    dW.style.left = (pan.x + W / 2) + 'px'; dW.style.top = pan.y + 'px';
+    dH.style.left = (pan.x - 10) + 'px'; dH.style.top = (pan.y + H / 2) + 'px';
+
+    const ref = currentRef(), s = refSize(ref);
+    Object.assign(refEl.style, {
+      width: s.w * p + 'px', height: s.h * p + 'px',
+      left: (pan.x + (state.refPos.x - s.w / 2) * p) + 'px',
+      top: (pan.y + (state.refPos.y - s.h / 2) * p) + 'px',
+    });
+
+    // controls
+    zoom.value = ppmToSlider(p);
+    zoom.disabled = $('zoomIn').disabled = $('zoomOut').disabled = state.locked;
+    lockBtn.setAttribute('aria-pressed', state.locked);
+    lockBtn.textContent = state.locked ? '🔒 Locked' : '🔓 Lock';
+    gridBtn.setAttribute('aria-pressed', state.grid);
+
+    const dpi = p * 25.4;
+    $('scaleText').textContent = `${p.toFixed(3)} px/mm · ${dpi.toFixed(1)} CSS px/in · ${(dpi * (window.devicePixelRatio || 1)).toFixed(0)} device PPI`;
+    $('status').textContent = state.locked
+      ? '✓ Calibrated. The paper is shown at real size.'
+      : state.calibrated
+        ? 'Calibrated. Lock the scale to keep it.'
+        : 'Not calibrated yet';
+    $('hint').textContent = state.locked
+      ? 'Drag the reference to compare. Drag the paper to pan.'
+      : `Hold a real ${ref.name.replace(/ \(.*\)$/, '')} against the screen and zoom until it matches exactly.`;
+  }
+
+  /* ---------------- zoom ---------------- */
+  const LOG_MIN = Math.log(MIN_PPM), LOG_MAX = Math.log(MAX_PPM);
+  const ppmToSlider = p => Math.round((Math.log(p) - LOG_MIN) / (LOG_MAX - LOG_MIN) * 1000);
+  const sliderToPpm = v => Math.exp(LOG_MIN + (v / 1000) * (LOG_MAX - LOG_MIN));
+
+  function stageRect() { return stage.getBoundingClientRect(); }
+  function refScreenCenter() {
+    return { x: pan.x + state.refPos.x * state.ppm, y: pan.y + state.refPos.y * state.ppm };
+  }
+  // Change scale while keeping the stage point (sx, sy) fixed
+  function zoomTo(newPpm, sx, sy) {
+    if (state.locked) return;
+    newPpm = Math.min(MAX_PPM, Math.max(MIN_PPM, newPpm));
+    const k = newPpm / state.ppm;
+    pan.x = sx - (sx - pan.x) * k;
+    pan.y = sy - (sy - pan.y) * k;
+    state.ppm = newPpm;
+    state.calibrated = true;
+    state.dpr = window.devicePixelRatio || 1;
+    checkDpr();
+    render(); save();
+  }
+  function zoomAroundRef(newPpm) { const c = refScreenCenter(); zoomTo(newPpm, c.x, c.y); }
+
+  zoom.addEventListener('input', () => zoomAroundRef(sliderToPpm(+zoom.value)));
+  // Fine steps for precise matching: 0.25% per tap, 2% with Shift; hold to repeat
+  function stepper(btn, dir) {
+    let t = 0, iv = 0;
+    const step = e => zoomAroundRef(state.ppm * (1 + dir * (e && e.shiftKey ? 0.02 : 0.0025)));
+    const stop = () => { clearTimeout(t); clearInterval(iv); };
+    btn.addEventListener('pointerdown', e => {
+      if (btn.disabled) return;
+      step(e);
+      t = setTimeout(() => { iv = setInterval(() => step(), 40); }, 350);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => btn.addEventListener(ev, stop));
+    btn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); step(e); } });
+  }
+  stepper($('zoomIn'), +1);
+  stepper($('zoomOut'), -1);
+
+  stage.addEventListener('wheel', e => {
+    e.preventDefault();
+    const r = stageRect();
+    if (state.locked) { pan.x -= e.deltaX; pan.y -= e.deltaY; render(); return; }
+    // ctrlKey = trackpad pinch on desktop browsers
+    const speed = e.ctrlKey ? 0.01 : (e.deltaMode === 1 ? 0.05 : 0.0015);
+    zoomTo(state.ppm * Math.exp(-e.deltaY * speed), e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
+
+  /* ---------------- pointer: drag reference, pan, pinch ---------------- */
+  const pointers = new Map();
+  let mode = null, start = null;
+
+  function localPt(e) { const r = stageRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  function beginGesture(e) {
+    const pts = [...pointers.values()];
+    if (pts.length >= 2) {
+      if (state.locked) { mode = 'pan'; start = { p: pts[0], pan: { ...pan } }; return; }
+      const [a, b] = pts;
+      mode = 'pinch';
+      start = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, ppm: state.ppm, pan: { ...pan } };
+      refEl.classList.remove('dragging');
+    } else if (pts.length === 1) {
+      const p = pts[0];
+      if (e && refEl.contains(e.target)) {
+        mode = 'ref';
+        const c = refScreenCenter();
+        start = { off: { x: p.x - c.x, y: p.y - c.y } };
+        refEl.classList.add('dragging');
+      } else {
+        mode = 'pan';
+        start = { p, pan: { ...pan } };
+        stage.classList.add('panning');
+      }
+    }
+  }
+
+  stage.addEventListener('pointerdown', e => {
+    if (e.button !== undefined && e.button > 0) return;
+    stage.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, localPt(e));
+    beginGesture(e);
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, localPt(e));
+    const pts = [...pointers.values()];
+    if (mode === 'ref') {
+      const p = pts[0];
+      state.refPos.x = (p.x - start.off.x - pan.x) / state.ppm;
+      state.refPos.y = (p.y - start.off.y - pan.y) / state.ppm;
+      clampRef(); render();
+    } else if (mode === 'pan') {
+      const p = pts[0];
+      pan.x = start.pan.x + (p.x - start.p.x);
+      pan.y = start.pan.y + (p.y - start.p.y);
+      render();
+    } else if (mode === 'pinch' && pts.length >= 2) {
+      const [a, b] = pts;
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const newPpm = Math.min(MAX_PPM, Math.max(MIN_PPM, start.ppm * d / start.d));
+      const k = newPpm / start.ppm;
+      pan.x = mid.x - (start.mid.x - start.pan.x) * k;
+      pan.y = mid.y - (start.mid.y - start.pan.y) * k;
+      state.ppm = newPpm;
+      state.calibrated = true;
+      state.dpr = window.devicePixelRatio || 1;
+      render();
+    }
+  });
+  function endPointer(e) {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.delete(e.pointerId);
+    refEl.classList.remove('dragging');
+    stage.classList.remove('panning');
+    if (pointers.size === 0) { mode = null; save(); }
+    else { mode = null; beginGesture(null); } // pinch -> one finger: continue as pan
+  }
+  stage.addEventListener('pointerup', endPointer);
+  stage.addEventListener('pointercancel', endPointer);
+  // iOS Safari: block its own page pinch-zoom (gesture events) so ours wins
+  ['gesturestart', 'gesturechange'].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
+
+  /* ---------------- inputs ---------------- */
+  function showPaperInputs() {
+    wIn.value = fmt(state.paper.w, state.unit);
+    hIn.value = fmt(state.paper.h, state.unit);
+    unitSel.value = state.unit;
+  }
+  function readPaper() {
+    const f = UNIT_MM[state.unit];
+    const w = parseFloat(wIn.value), h = parseFloat(hIn.value);
+    if (w > 0) state.paper.w = Math.min(w * f, 5000);
+    if (h > 0) state.paper.h = Math.min(h * f, 5000);
+    presetSel.value = '';
+    clampRef(); render(); save();
+  }
+  wIn.addEventListener('input', readPaper);
+  hIn.addEventListener('input', readPaper);
+  unitSel.addEventListener('change', () => { state.unit = unitSel.value; showPaperInputs(); render(); save(); });
+  presetSel.addEventListener('change', () => {
+    const p = PRESETS[+presetSel.value];
+    if (!p) return;
+    state.paper = { w: p.w, h: p.h };
+    state.refPos = { x: p.w / 2, y: p.h / 2 };
+    showPaperInputs(); centerView(); save();
+    presetSel.value = '';
+  });
+  refSel.addEventListener('change', () => { state.refId = refSel.value; state.rotated = false; buildRef(); render(); save(); });
+  $('rotate').addEventListener('click', () => { state.rotated = !state.rotated; buildRef(); render(); save(); });
+  gridBtn.addEventListener('click', () => { state.grid = !state.grid; render(); save(); });
+  lockBtn.addEventListener('click', () => { state.locked = !state.locked; if (state.locked) state.calibrated = true; render(); save(); });
+  $('center').addEventListener('click', centerView);
+
+  const cShape = $('cShape'), cA = $('cA'), cB = $('cB');
+  function readCustom() {
+    state.custom = { shape: cShape.value, a: parseFloat(cA.value) || state.custom.a, b: parseFloat(cB.value) || state.custom.b };
+    buildRef(); render(); save();
+  }
+  [cShape, cA, cB].forEach(el => el.addEventListener('input', readCustom));
+
+  document.addEventListener('keydown', e => {
+    if (e.target.matches('input, select')) return;
+    if (e.key === '+' || e.key === '=') zoomAroundRef(state.ppm * 1.0025);
+    else if (e.key === '-' || e.key === '_') zoomAroundRef(state.ppm / 1.0025);
+  });
+
+  /* ---------------- view helpers ---------------- */
+  function centerView() {
+    const r = stageRect();
+    const W = state.paper.w * state.ppm, H = state.paper.h * state.ppm;
+    // If the paper fits, centre it; otherwise centre on the reference object
+    if (W <= r.width - 40 && H <= r.height - 50) {
+      pan.x = (r.width - W) / 2; pan.y = (r.height - H) / 2 + 8;
+    } else {
+      pan.x = r.width / 2 - state.refPos.x * state.ppm;
+      pan.y = r.height / 2 - state.refPos.y * state.ppm;
+    }
+    render();
+  }
+
+  function checkDpr() {
+    const warn = $('warn');
+    const now = window.devicePixelRatio || 1;
+    if (state.calibrated && Math.abs(now - state.dpr) > 0.01) {
+      warn.textContent = `Your browser zoom or display changed since you calibrated (${state.dpr} → ${now}). Unlock and match the reference again, or reset browser zoom to where it was.`;
+      warn.classList.add('show');
+    } else warn.classList.remove('show');
+  }
+  window.addEventListener('resize', () => { checkDpr(); render(); });
+
+  /* ---------------- boot ---------------- */
+  load();
+  refSel.value = state.refId;
+  cShape.value = state.custom.shape; cA.value = state.custom.a; cB.value = state.custom.b;
+  showPaperInputs();
+  buildRef();
+  requestAnimationFrame(() => { centerView(); checkDpr(); });
+
+  // Test hook (harmless in production)
+  window.RealSize = { state, REFS, render, zoomTo };
+})();
+</script>
+</body>
+</html>
