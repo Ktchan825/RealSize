@@ -153,6 +153,28 @@
   .hint { color: var(--muted); font-size: 12px; }
   .spacer { flex: 1; }
 
+  #infoBtn { padding: 2px 8px; min-height: 0; font-size: 12px; }
+  #credits {
+    max-width: min(640px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    color: var(--text);
+  }
+  #credits::backdrop { background: rgba(0, 0, 0, .45); }
+  #credits .body { padding: 14px 16px; overflow: auto; }
+  #credits h2 { font-size: 16px; margin: 0 0 8px; }
+  #credits h3 { font-size: 13px; margin: 14px 0 4px; }
+  #credits p, #credits li { font-size: 13px; color: var(--muted); margin: 4px 0; }
+  #credits ul { padding-left: 18px; margin: 4px 0; }
+  #credits table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  #credits th, #credits td { text-align: left; vertical-align: top; padding: 4px 6px; border-top: 1px solid var(--line); }
+  #credits td:nth-child(2) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #credits a { color: var(--accent); }
+  #credits .foot { display: flex; justify-content: flex-end; padding: 10px 16px; border-top: 1px solid var(--line); }
+
   @media (max-width: 560px) {
     body { font-size: 13px; }
     header { padding-top: max(6px, env(safe-area-inset-top)); }
@@ -171,6 +193,7 @@
   <div class="row">
     <h1>Real<span>Size</span></h1>
     <div class="status" id="status"></div>
+    <button id="infoBtn" type="button" title="Where the sizes and drawings come from">ⓘ<span class="hide-sm"> Sources</span></button>
   </div>
   <div class="row">
     <label><span class="hide-sm">Size</span>
@@ -241,6 +264,27 @@
   </div>
 </div>
 
+<dialog id="credits" aria-labelledby="creditsTitle">
+  <div class="body">
+    <h2 id="creditsTitle">Sources &amp; credits</h2>
+    <p>Every reference object is a plain shape drawn by RealSize from its published size. No photos, coin or banknote artwork, logos or product images are bundled.</p>
+    <table>
+      <thead><tr><th>Object</th><th>Size (mm)</th><th>Size source</th></tr></thead>
+      <tbody id="creditRows"></tbody>
+    </table>
+    <p>* The HKMA publishes no coin diameters online, so coin sizes come from Wikipedia. Metals and edges were checked against the <a href="https://www.hkma.gov.hk/media/eng/doc/key-functions/monetary-stability/notes-and-coins/Leaflet_e.pdf" target="_blank" rel="noopener">HKMA security features leaflet</a>.</p>
+    <h3>Drawings</h3>
+    <p>All outlines, colours and number labels are original simplified drawings made for RealSize. They show size only and do not copy the design of any coin, banknote or product.</p>
+    <h3>Your photos</h3>
+    <p>A photo you add with 📷 stays in this browser (localStorage) and is never uploaded. Only use photos you took or have the right to use.</p>
+    <h3>Trademarks</h3>
+    <p>iPhone is a trademark of Apple Inc. Octopus is a trademark of Octopus Cards Limited. Names are used only to say which object to hold against the screen. RealSize is not affiliated with or endorsed by Apple, Octopus, the HKMA or the HKSAR Government.</p>
+    <h3>Accuracy</h3>
+    <p>Sizes are nominal. Worn coins, cases and screen protectors change the real size slightly. The full record, with the date each source was checked, is in CREDITS.md in the project repository.</p>
+  </div>
+  <div class="foot"><button id="creditsClose" type="button" class="primary">Close</button></div>
+</dialog>
+
 <script>
 (() => {
   'use strict';
@@ -253,25 +297,23 @@
    * ------------------------------------------------------------- */
   const SILVER = ['#f4f5f7', '#b9bec7', '#8b919c'];
   const BRASS  = ['#fbe7a1', '#d6b04c', '#a07c1f'];
-  // Sources (checked 2026-11-16):
-  //  - Coin diameters: Wikipedia "Coins of the Hong Kong dollar" (HKMA publishes no diameters online).
-  //    Metals/edges cross-checked with the HKMA "Security Features" leaflet.
-  //  - HK$100 (2018 series): HKMA 2018 New Series leaflet, 153 x 76.5 mm.
-  //  - Card: ISO/IEC 7810 ID-1, 85.60 x 53.98 mm, corner radius 3.18 mm.
-  //  - iPhone 16: support.apple.com/121029, 147.6 x 71.6 mm. Corner radius is not published (estimate).
-  //  Scalloped coins: d = across the bumps, dMin = across the dips.
+  // Every object carries `src`: where its size comes from. The page's
+  // "Sources" dialog is built from these fields, and CREDITS.md mirrors them.
+  // Keep both in step when adding an object.
+  // Scalloped coins: d = across the bumps, dMin = across the dips.
+  const SRC_HK_COINS = { text: 'Wikipedia: Coins of the Hong Kong dollar*', url: 'https://en.wikipedia.org/wiki/Coins_of_the_Hong_Kong_dollar' };
   const REFS = [
-    { id: 'hkd5',   group: 'Hong Kong coins', name: 'HK$5 coin',   shape: 'circle',  d: 27.0, metal: SILVER, label: '5' },
-    { id: 'hkd10',  group: 'Hong Kong coins', name: 'HK$10 coin',  shape: 'circle',  d: 24.0, metal: SILVER, inner: BRASS, innerD: 17.0, label: '10' },
-    { id: 'hkd2',   group: 'Hong Kong coins', name: 'HK$2 coin',   shape: 'scallop', d: 28.0, dMin: 26.3, n: 10, metal: SILVER, label: '2' },
-    { id: 'hkd1',   group: 'Hong Kong coins', name: 'HK$1 coin',   shape: 'circle',  d: 25.5, metal: SILVER, label: '1' },
-    { id: 'hkc50',  group: 'Hong Kong coins', name: 'HK 50¢ coin', shape: 'circle',  d: 22.5, metal: BRASS,  label: '50' },
-    { id: 'hkc20',  group: 'Hong Kong coins', name: 'HK 20¢ coin', shape: 'scallop', d: 19.0, dMin: 18.0, n: 10, metal: BRASS, label: '20' },
-    { id: 'hkc10',  group: 'Hong Kong coins', name: 'HK 10¢ coin', shape: 'circle',  d: 17.5, metal: BRASS,  label: '10' },
-    { id: 'card',   group: 'Cards',           name: 'Credit / Octopus / ID card', shape: 'rect', w: 85.60, h: 53.98, r: 3.18, fill: ['#3b6fd8', '#22408c'], label: 'ISO ID-1 card', note: 'Most accurate: largest standard size' },
-    { id: 'hkd100', group: 'Banknotes',       name: 'HK$100 note, 2018 series (153 × 76.5)', shape: 'rect', w: 153, h: 76.5, r: 1, fill: ['#e0574f', '#9e2a24'], label: 'HK$100' },
-    { id: 'iph16',  group: 'Phones',          name: 'iPhone 16 (147.6 × 71.6)', shape: 'rect', w: 71.6, h: 147.6, r: 10, fill: ['#3a3d44', '#15171b'], label: 'iPhone 16' },
-    { id: 'custom', group: 'Other',           name: 'Custom…', shape: 'circle', d: 27, metal: SILVER, label: '' },
+    { id: 'hkd5',   group: 'Hong Kong coins', name: 'HK$5 coin',   shape: 'circle',  d: 27.0, metal: SILVER, label: '5', src: SRC_HK_COINS },
+    { id: 'hkd10',  group: 'Hong Kong coins', name: 'HK$10 coin',  shape: 'circle',  d: 24.0, metal: SILVER, inner: BRASS, innerD: 17.0, label: '10', src: SRC_HK_COINS },
+    { id: 'hkd2',   group: 'Hong Kong coins', name: 'HK$2 coin',   shape: 'scallop', d: 28.0, dMin: 26.3, n: 10, metal: SILVER, label: '2', src: SRC_HK_COINS },
+    { id: 'hkd1',   group: 'Hong Kong coins', name: 'HK$1 coin',   shape: 'circle',  d: 25.5, metal: SILVER, label: '1', src: SRC_HK_COINS },
+    { id: 'hkc50',  group: 'Hong Kong coins', name: 'HK 50¢ coin', shape: 'circle',  d: 22.5, metal: BRASS,  label: '50', src: SRC_HK_COINS },
+    { id: 'hkc20',  group: 'Hong Kong coins', name: 'HK 20¢ coin', shape: 'scallop', d: 19.0, dMin: 18.0, n: 10, metal: BRASS, label: '20', src: SRC_HK_COINS },
+    { id: 'hkc10',  group: 'Hong Kong coins', name: 'HK 10¢ coin', shape: 'circle',  d: 17.5, metal: BRASS,  label: '10', src: SRC_HK_COINS },
+    { id: 'card',   group: 'Cards',           name: 'Credit / Octopus / ID card', shape: 'rect', w: 85.60, h: 53.98, r: 3.18, fill: ['#3b6fd8', '#22408c'], label: 'ISO ID-1 card', src: { text: 'ISO/IEC 7810 ID-1 (85.60 × 53.98 mm, corner radius 3.18 mm)', url: 'https://en.wikipedia.org/wiki/ISO/IEC_7810' }, note: 'Most accurate: largest standard size' },
+    { id: 'hkd100', group: 'Banknotes',       name: 'HK$100 note, 2018 series (153 × 76.5)', shape: 'rect', w: 153, h: 76.5, r: 1, fill: ['#e0574f', '#9e2a24'], label: 'HK$100', banknote: true, src: { text: 'HKMA 2018 New Series banknotes leaflet', url: 'https://www.hkma.gov.hk/media/eng/doc/key-functions/money/notes-and-coins/design-and-security/2018/Leaflet_Eng.pdf' } },
+    { id: 'iph16',  group: 'Phones',          name: 'iPhone 16 (147.6 × 71.6)', shape: 'rect', w: 71.6, h: 147.6, r: 10, fill: ['#3a3d44', '#15171b'], label: 'iPhone 16', src: { text: 'Apple iPhone 16 tech specs. Corner radius is not published (estimate).', url: 'https://support.apple.com/121029' } },
+    { id: 'custom', group: 'Other',           name: 'Custom…', shape: 'circle', d: 27, metal: SILVER, label: '', src: { text: 'Your own measurement' } },
   ];
 
   const PRESETS = [
@@ -768,7 +810,11 @@
   $('center').addEventListener('click', centerView);
 
   const photoFile = $('photoFile');
-  $('photoBtn').addEventListener('click', () => getPhoto() ? setFitting(!fitting) : photoFile.click());
+  $('photoBtn').addEventListener('click', () => {
+    if (getPhoto()) return setFitting(!fitting);
+    if (currentRef().banknote) showWarn('Your banknote photo stays on this device. Don\'t print, post or share a real-size copy of it: reproducing banknotes needs the issuing bank\'s consent.');
+    photoFile.click();
+  });
   $('phReplace').addEventListener('click', () => photoFile.click());
   photoFile.addEventListener('change', () => { loadPhotoFile(photoFile.files[0]); photoFile.value = ''; });
   $('phDone').addEventListener('click', () => setFitting(false));
@@ -838,6 +884,28 @@
   requestAnimationFrame(() => { centerView(); checkDpr(); });
 
   // Test hook (harmless in production)
+  // Sources dialog, built from REFS so the page and the data can't drift apart
+  const creditRows = $('creditRows');
+  REFS.forEach(r => {
+    if (r.id === 'custom') return;
+    const tr = document.createElement('tr');
+    const size = r.shape === 'rect' ? `${r.w} × ${r.h}` : r.dMin ? `Ø ${r.dMin}–${r.d}` : `Ø ${r.d}`;
+    const name = r.name.replace(/\s*\(.*\)$/, '');
+    [name, size].forEach(t => { const td = document.createElement('td'); td.textContent = t; tr.appendChild(td); });
+    const td = document.createElement('td');
+    if (r.src.url) {
+      const a = document.createElement('a');
+      a.href = r.src.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = r.src.text;
+      td.appendChild(a);
+    } else td.textContent = r.src.text;
+    tr.appendChild(td);
+    creditRows.appendChild(tr);
+  });
+  const credits = $('credits');
+  $('infoBtn').addEventListener('click', () => credits.showModal());
+  $('creditsClose').addEventListener('click', () => credits.close());
+  credits.addEventListener('click', e => { if (e.target === credits) credits.close(); });
+
   window.RealSize = { state, REFS, render, zoomTo, photos, getPhoto, loadPhotoFile };
 })();
 </script>
